@@ -12,6 +12,55 @@ from adobe.pdfservices.operation.pdfjobs.result.pdf_accessibility_checker_result
 from botocore.exceptions import ClientError
 import re
 
+
+def _coerce_to_dict(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _extract_inputs(event):
+    event_dict = _coerce_to_dict(event)
+    payload = _coerce_to_dict(event_dict.get("Payload"))
+
+    for source in (payload, event_dict):
+        if not source:
+            continue
+
+        body = _coerce_to_dict(source.get("body"))
+        status_code = source.get("statusCode")
+        if isinstance(status_code, int) and status_code >= 400:
+            upstream_error = body.get("error", "unknown error")
+            upstream_details = body.get("details", "")
+            raise RuntimeError(
+                f"Upstream lambda returned statusCode {status_code}: "
+                f"{upstream_error}. {upstream_details}".strip()
+            )
+
+        s3_bucket = (
+            source.get("s3_bucket")
+            or source.get("bucket")
+            or body.get("s3_bucket")
+            or body.get("bucket")
+        )
+        save_path = source.get("save_path") or body.get("save_path")
+        if s3_bucket and save_path:
+            return s3_bucket, save_path
+
+    available_keys = sorted(event_dict.keys()) if isinstance(event_dict, dict) else []
+    raise ValueError(
+        "Missing required inputs. Provide bucket under "
+        "'s3_bucket' or 'bucket' and file key under 'save_path'. "
+        f"Top-level keys seen: {available_keys}"
+    )
+
 def create_json_output_file_path():
         os.makedirs("/tmp/PDFAccessibilityChecker", exist_ok=True)
         return f"/tmp/PDFAccessibilityChecker/result_after_remediation.json"
@@ -71,15 +120,7 @@ def get_secret(basefilename):
 def lambda_handler(event, context):
     print("Received event:", event)
     
-    # Extracting nested values from the event
-    payload = event.get('Payload', {})
-    body = payload.get('body', {})
-    s3_bucket = body.get('bucket')
-    save_path = body.get('save_path')
-
-    # Validate inputs
-    if not s3_bucket or not save_path:
-        raise ValueError("Missing required inputs: 's3_bucket' or 'save_path'")
+    s3_bucket, save_path = _extract_inputs(event)
 
     print(f"s3_bucket: {s3_bucket}, save_path: {save_path}")
 

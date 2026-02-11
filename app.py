@@ -201,6 +201,12 @@ class PDFAccessibility(Stack):
                                       ),
                                       propagated_tag_source=ecs.PropagatedTagSource.TASK_DEFINITION,
                                      )
+        adobe_autotag_task.add_retry(
+            errors=["RateLimitError", "States.TaskFailed"],
+            interval=Duration.seconds(30),
+            max_attempts=5,
+            backoff_rate=2.0
+        )
 
         alt_text_generation_task = tasks.EcsRunTask(self, "RunAltTextGenerationTask",
                                       integration_pattern=sfn.IntegrationPattern.RUN_JOB,
@@ -332,6 +338,12 @@ class PDFAccessibility(Stack):
             payload=sfn.TaskInput.from_json_path_at("$"),
             output_path="$.Payload"
         )
+        pre_remediation_accessibility_checker_task.add_retry(
+            errors=["RateLimitError", "States.TaskFailed"],
+            interval=Duration.seconds(30),
+            max_attempts=5,
+            backoff_rate=2.0
+        )
 
         post_remediation_accessibility_checker = lambda_.Function(
             self,'PostRemediationAccessibilityAuditor',
@@ -357,6 +369,12 @@ class PDFAccessibility(Stack):
             lambda_function=post_remediation_accessibility_checker,
             payload=sfn.TaskInput.from_json_path_at("$"),
             output_path="$.Payload"
+        )
+        post_remediation_accessibility_checker_task.add_retry(
+            errors=["RateLimitError", "States.TaskFailed"],
+            interval=Duration.seconds(30),
+            max_attempts=5,
+            backoff_rate=2.0
         )
         
         remediation_chain = pdf_chunks_map_state.next(pdf_merger_lambda_task).next(title_generator_lambda_task).next(post_remediation_accessibility_checker_task)
