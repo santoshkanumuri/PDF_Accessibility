@@ -4,7 +4,7 @@ phases:
   install:
     runtime-versions:
       python: 3.12
-      nodejs: 22
+      nodejs: 18
     commands:
       - echo "Installing dependencies..."
       - npm install -g aws-cdk@latest
