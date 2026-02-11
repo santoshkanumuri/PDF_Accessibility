@@ -55,11 +55,13 @@ class PDFAccessibility(Stack):
                                                              ),
                                                              outputs=["type=image,compression=zstd,compression-level=3,force-compression=true"])
 
-        # VPC with Public and Private Subnets
-        # Keep legacy construct ID to preserve CloudFormation logical IDs across updates.
-        pdf_processing_vpc = ec2.Vpc(self, "MyVpc",
+        # VPC with Public and Private Subnets.
+        # Disable default SG restriction custom resource to avoid ec2:*SecurityGroup*
+        # API calls from the CDK helper role in constrained IAM environments.
+        pdf_processing_vpc = ec2.Vpc(self, "PdfProcessingVpc",
             max_azs=2,
             nat_gateways=1,
+            restrict_default_security_group=False,
             subnet_configuration=[
                 ec2.SubnetConfiguration(
                     subnet_type=ec2.SubnetType.PUBLIC,
@@ -74,38 +76,6 @@ class PDFAccessibility(Stack):
             ]
         )
         
-        # Grant additional EC2 permissions to the CDK-generated
-        # CustomVpcRestrictDefaultSG provider role.
-        restrict_default_sg_role_refs = []
-        for construct in self.node.find_all():
-            if isinstance(construct, iam.CfnRole) and "CustomVpcRestrictDefaultSG" in construct.node.path:
-                restrict_default_sg_role_refs.append(construct.ref)
-
-        if restrict_default_sg_role_refs:
-            iam.CfnPolicy(
-                self,
-                "RestrictDefaultSgCustomResourceExtraEc2Permissions",
-                policy_name="RestrictDefaultSgCustomResourceExtraEc2Permissions",
-                roles=restrict_default_sg_role_refs,
-                policy_document={
-                    "Version": "2012-10-17",
-                    "Statement": [
-                        {
-                            "Effect": "Allow",
-                            "Action": [
-                                "ec2:AuthorizeSecurityGroupIngress",
-                                "ec2:AuthorizeSecurityGroupEgress",
-                                "ec2:RevokeSecurityGroupIngress",
-                                "ec2:RevokeSecurityGroupEgress",
-                                "ec2:DescribeSecurityGroups",
-                                "ec2:DescribeSecurityGroupRules"
-                            ],
-                            "Resource": "*"
-                        }
-                    ]
-                }
-            )
-
         # VPC Endpoints for faster ECR image pulls (reduces cold start by 10-15s)
         pdf_processing_vpc.add_interface_endpoint("EcrApiEndpoint",
             service=ec2.InterfaceVpcEndpointAwsService.ECR

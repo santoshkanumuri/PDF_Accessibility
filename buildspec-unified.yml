@@ -166,8 +166,49 @@ phases:
         elif [ "$DEPLOYMENT_TYPE" = "pdf2pdf" ]; then
           echo "Deploying PDF-to-PDF Remediation Solution..."
           echo "Deploying CDK stacks with retry logic..."
+          STACK_NAME="PDFAccessibility"
+          
+          wait_for_stack_idle() {
+            local stack_name="$1"
+            local max_wait_seconds=3600
+            local waited=0
+            
+            while true; do
+              local status
+              status=$(aws cloudformation describe-stacks --stack-name "$stack_name" --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "STACK_NOT_FOUND")
+              
+              case "$status" in
+                "STACK_NOT_FOUND")
+                  echo "Stack $stack_name does not exist yet. Proceeding with deploy."
+                  return 0
+                  ;;
+                *_IN_PROGRESS)
+                  echo "Stack $stack_name is $status. Waiting 30 seconds..."
+                  sleep 30
+                  waited=$((waited + 30))
+                  if [ $waited -ge $max_wait_seconds ]; then
+                    echo "Timed out waiting for stack $stack_name to become stable."
+                    return 1
+                  fi
+                  ;;
+                "UPDATE_ROLLBACK_FAILED"|"ROLLBACK_FAILED")
+                  echo "Stack $stack_name is in $status. Manual recovery required before deploy."
+                  return 1
+                  ;;
+                *)
+                  echo "Stack $stack_name is stable: $status"
+                  return 0
+                  ;;
+              esac
+            done
+          }
+
           for i in {1..3}; do
             echo "CDK deploy attempt $i/3..."
+            if ! wait_for_stack_idle "$STACK_NAME"; then
+              echo "Stack is not deployable. Stopping retry loop."
+              exit 1
+            fi
             if cdk deploy --all --require-approval never; then
               echo "CDK deploy successful on attempt $i"
               break
