@@ -56,7 +56,8 @@ class PDFAccessibility(Stack):
                                                              outputs=["type=image,compression=zstd,compression-level=3,force-compression=true"])
 
         # VPC with Public and Private Subnets
-        pdf_processing_vpc = ec2.Vpc(self, "PdfProcessingVpc",
+        # Keep legacy construct ID to preserve CloudFormation logical IDs across updates.
+        pdf_processing_vpc = ec2.Vpc(self, "MyVpc",
             max_azs=2,
             nat_gateways=1,
             subnet_configuration=[
