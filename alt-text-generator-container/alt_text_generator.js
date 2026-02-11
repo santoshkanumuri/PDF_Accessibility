@@ -69,6 +69,28 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function getModelText(responseBody) {
+    const text = responseBody?.output?.message?.content?.find((item) => typeof item?.text === 'string')?.text;
+    if (!text) {
+        throw new Error(`Unexpected Bedrock response format: ${JSON.stringify(responseBody)}`);
+    }
+    return text;
+}
+
+function parseAltTextJson(rawText) {
+    try {
+        return JSON.parse(rawText);
+    } catch (err) {
+        const fenced = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+        const candidate = fenced ? fenced[1] : rawText;
+        const objectMatch = candidate.match(/\{[\s\S]*\}/);
+        if (!objectMatch) {
+            throw err;
+        }
+        return JSON.parse(objectMatch[0]);
+    }
+}
+
 
 /**
  * Invokes the Bedrock AI model to generate alt text for a given image.
@@ -136,8 +158,9 @@ const invokeModel = async (
     // Decode and return the response(s)
     const decodedResponseBody = new TextDecoder("utf-8").decode(apiResponse.body);
     const responseBody = JSON.parse(decodedResponseBody);
-    logger.info(`response of alt text: ${responseBody.output.message}`);
-    return responseBody.output.message;
+    const modelText = getModelText(responseBody);
+    logger.info(`response of alt text: ${modelText}`);
+    return modelText;
 };
 
 /**
@@ -517,7 +540,7 @@ async function startProcess() {
                 const image_Buffer = await fs.readFile(localFilePath);
                 const response = await generateAltText(imageObject, image_Buffer);
                 logger.info(`Filename: ${filebasename} | Response:${response}`);
-                Object.assign(combinedResults, JSON.parse(response));
+                Object.assign(combinedResults, parseAltTextJson(response));
                 successCount++;
                 logger.info(`Filename: ${filebasename} | Alt text generation succeeded for image ${imageObject.id} (${successCount} succeeded, ${failureCount} failed)`);
             } catch (error) {

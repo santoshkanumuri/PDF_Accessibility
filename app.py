@@ -73,6 +73,38 @@ class PDFAccessibility(Stack):
                 ),
             ]
         )
+        
+        # Grant additional EC2 permissions to the CDK-generated
+        # CustomVpcRestrictDefaultSG provider role.
+        restrict_default_sg_role_refs = []
+        for construct in self.node.find_all():
+            if isinstance(construct, iam.CfnRole) and "CustomVpcRestrictDefaultSG" in construct.node.path:
+                restrict_default_sg_role_refs.append(construct.ref)
+
+        if restrict_default_sg_role_refs:
+            iam.CfnPolicy(
+                self,
+                "RestrictDefaultSgCustomResourceExtraEc2Permissions",
+                policy_name="RestrictDefaultSgCustomResourceExtraEc2Permissions",
+                roles=restrict_default_sg_role_refs,
+                policy_document={
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Action": [
+                                "ec2:AuthorizeSecurityGroupIngress",
+                                "ec2:AuthorizeSecurityGroupEgress",
+                                "ec2:RevokeSecurityGroupIngress",
+                                "ec2:RevokeSecurityGroupEgress",
+                                "ec2:DescribeSecurityGroups",
+                                "ec2:DescribeSecurityGroupRules"
+                            ],
+                            "Resource": "*"
+                        }
+                    ]
+                }
+            )
 
         # VPC Endpoints for faster ECR image pulls (reduces cold start by 10-15s)
         pdf_processing_vpc.add_interface_endpoint("EcrApiEndpoint",
