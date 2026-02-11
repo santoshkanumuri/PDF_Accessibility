@@ -475,7 +475,7 @@ class PDFAccessibility(Stack):
         )
         check_only_api.add_gateway_response(
             "CheckOnlyDefault4xx",
-            type=apigateway.ResponseType.DEFAULT_4XX,
+            type=apigateway.ResponseType.DEFAULT_4_XX,
             response_headers={
                 "Access-Control-Allow-Origin": f"'{frontend_origin}'",
                 "Access-Control-Allow-Headers": "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'",
@@ -484,7 +484,7 @@ class PDFAccessibility(Stack):
         )
         check_only_api.add_gateway_response(
             "CheckOnlyDefault5xx",
-            type=apigateway.ResponseType.DEFAULT_5XX,
+            type=apigateway.ResponseType.DEFAULT_5_XX,
             response_headers={
                 "Access-Control-Allow-Origin": f"'{frontend_origin}'",
                 "Access-Control-Allow-Headers": "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'",
