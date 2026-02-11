@@ -246,7 +246,7 @@ async function generateAltText(imageObject, imageBuffer) {
     try {
         const response = await invokeModel(prompt, imageBuffer);
         
-        return response.content[0].text;
+        return response;
     } catch (error) {
       
         throw error;

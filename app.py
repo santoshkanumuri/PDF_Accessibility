@@ -3,6 +3,7 @@ from aws_cdk import (
     Duration,
     Stack,
     aws_lambda as lambda_,
+    aws_apigateway as apigateway,
     aws_s3 as s3,
     aws_s3_notifications as s3n,
     aws_s3_deployment as s3deploy,
@@ -34,6 +35,7 @@ class PDFAccessibility(Stack):
         # Get account and region for use throughout the stack
         account_id = Stack.of(self).account
         region = Stack.of(self).region
+        frontend_origin = "https://main.d3ono8odjszjnu.amplifyapp.com"
 
         # Docker images with zstd compression for faster Fargate cold starts
         # zstd decompresses ~2-3x faster than gzip, reducing container startup time
@@ -379,7 +381,30 @@ class PDFAccessibility(Stack):
             max_attempts=5,
             backoff_rate=2.0
         )
-        
+
+        check_only_accessibility_checker = lambda_.Function(
+            self,
+            "CheckOnlyAccessibilityAuditor",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="main.lambda_handler",
+            code=lambda_.Code.from_docker_build("lambda/check-only-accessibility-checker"),
+            timeout=Duration.seconds(900),
+            memory_size=512,
+            architecture=lambda_arch,
+            environment={
+                "BUCKET_NAME": pdf_processing_bucket.bucket_name,
+                "ALLOWED_ORIGIN": frontend_origin,
+            },
+        )
+        check_only_accessibility_checker.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["secretsmanager:GetSecretValue"],
+                resources=[f"arn:aws:secretsmanager:{region}:{account_id}:secret:/myapp/*"],
+            )
+        )
+        pdf_processing_bucket.grant_read_write(check_only_accessibility_checker)
+        check_only_accessibility_checker.add_to_role_policy(cloudwatch_metrics_policy)
+
         remediation_chain = pdf_chunks_map_state.next(pdf_merger_lambda_task).next(title_generator_lambda_task).next(post_remediation_accessibility_checker_task)
 
         parallel_accessibility_workflow = sfn.Parallel(self, "ParallelAccessibilityWorkflow",
@@ -430,6 +455,51 @@ class PDFAccessibility(Stack):
 
         # Pass State Machine ARN to Lambda as an Environment Variable
         pdf_splitter_lambda.add_environment("STATE_MACHINE_ARN", pdf_remediation_state_machine.state_machine_arn)
+
+        check_only_api = apigateway.RestApi(
+            self,
+            "PdfAccessibilityCheckOnlyApi",
+            rest_api_name="pdf-accessibility-check-only-api",
+            deploy_options=apigateway.StageOptions(stage_name="prod"),
+            default_cors_preflight_options=apigateway.CorsOptions(
+                allow_origins=[frontend_origin],
+                allow_methods=["POST", "OPTIONS"],
+                allow_headers=[
+                    "Content-Type",
+                    "Authorization",
+                    "X-Amz-Date",
+                    "X-Api-Key",
+                    "X-Amz-Security-Token",
+                ],
+            ),
+        )
+        check_only_api.add_gateway_response(
+            "CheckOnlyDefault4xx",
+            type=apigateway.ResponseType.DEFAULT_4XX,
+            response_headers={
+                "Access-Control-Allow-Origin": f"'{frontend_origin}'",
+                "Access-Control-Allow-Headers": "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'",
+                "Access-Control-Allow-Methods": "'POST,OPTIONS'",
+            },
+        )
+        check_only_api.add_gateway_response(
+            "CheckOnlyDefault5xx",
+            type=apigateway.ResponseType.DEFAULT_5XX,
+            response_headers={
+                "Access-Control-Allow-Origin": f"'{frontend_origin}'",
+                "Access-Control-Allow-Headers": "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'",
+                "Access-Control-Allow-Methods": "'POST,OPTIONS'",
+            },
+        )
+        check_only_resource = check_only_api.root.add_resource("check-only")
+        check_only_resource.add_method(
+            "POST",
+            apigateway.LambdaIntegration(check_only_accessibility_checker),
+            authorization_type=apigateway.AuthorizationType.NONE,
+        )
+        cdk.CfnOutput(self, "CheckOnlyApiBaseUrl", value=check_only_api.url)
+        cdk.CfnOutput(self, "CheckOnlyApiEndpoint", value=f"{check_only_api.url}check-only")
+
         # Store log group names dynamically
         pdf_splitter_lambda_log_group_name = f"/aws/lambda/{pdf_splitter_lambda.function_name}"
         pdf_merger_lambda_log_group_name = f"/aws/lambda/{pdf_merger_lambda.function_name}"
