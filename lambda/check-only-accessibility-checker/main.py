@@ -92,6 +92,7 @@ def resolve_download_key(bucket_name, source_key):
         candidates.append(f"pdf/{file_name}")
 
     tried = []
+    access_denied_keys = []
     for candidate in candidates:
         if candidate in tried:
             continue
@@ -99,8 +100,20 @@ def resolve_download_key(bucket_name, source_key):
         try:
             s3_client.head_object(Bucket=bucket_name, Key=candidate)
             return candidate
-        except ClientError:
+        except ClientError as e:
+            error_code = e.response.get("Error", {}).get("Code", "")
+            if error_code in ("403", "AccessDenied"):
+                access_denied_keys.append(candidate)
+                print(f"AccessDenied on s3://{bucket_name}/{candidate} — "
+                      f"Lambda role may lack s3:GetObject/HeadObject permission on this bucket.")
             continue
+
+    if access_denied_keys:
+        raise PermissionError(
+            f"Access denied reading from s3://{bucket_name}. "
+            f"The Lambda role does not have permission on this bucket. "
+            f"Denied keys: {access_denied_keys}"
+        )
 
     raise FileNotFoundError(
         f"Could not find input PDF in s3://{bucket_name}. Tried keys: {tried}"
@@ -240,6 +253,11 @@ def lambda_handler(event, context):
         )
     except ValueError as err:
         return build_response(400, {"error": str(err)}, origin)
+    except PermissionError as err:
+        print(f"Permission error: {err}")
+        return build_response(
+            403, {"error": str(err)}, origin
+        )
     except FileNotFoundError as err:
         return build_response(404, {"error": str(err)}, origin)
     except (ServiceApiException, ServiceUsageException, SdkException) as err:

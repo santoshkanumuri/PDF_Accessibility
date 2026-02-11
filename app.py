@@ -403,6 +403,25 @@ class PDFAccessibility(Stack):
             )
         )
         pdf_processing_bucket.grant_read_write(check_only_accessibility_checker)
+
+        # The frontend uploads PDFs to the CDK staging bucket (not pdf_processing_bucket)
+        # and passes the bucket name dynamically in the request body. Grant broad S3
+        # access so the Lambda can read/write whichever bucket the caller specifies.
+        check_only_accessibility_checker.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "s3:GetObject",
+                    "s3:HeadObject",
+                    "s3:PutObject",
+                    "s3:ListBucket",
+                ],
+                resources=[
+                    f"arn:aws:s3:::cdkbackendstack-*",
+                    f"arn:aws:s3:::cdkbackendstack-*/*",
+                ],
+            )
+        )
+
         check_only_accessibility_checker.add_to_role_policy(cloudwatch_metrics_policy)
 
         remediation_chain = pdf_chunks_map_state.next(pdf_merger_lambda_task).next(title_generator_lambda_task).next(post_remediation_accessibility_checker_task)
@@ -499,6 +518,7 @@ class PDFAccessibility(Stack):
         )
         cdk.CfnOutput(self, "CheckOnlyApiBaseUrl", value=check_only_api.url)
         cdk.CfnOutput(self, "CheckOnlyApiEndpoint", value=f"{check_only_api.url}check-only")
+        cdk.CfnOutput(self, "PdfProcessingBucketName", value=pdf_processing_bucket.bucket_name)
 
         # Store log group names dynamically
         pdf_splitter_lambda_log_group_name = f"/aws/lambda/{pdf_splitter_lambda.function_name}"
